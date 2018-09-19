@@ -33,17 +33,23 @@ type Dialer struct {
 	// LocalName is the hostname sent to the SMTP server with the HELO command.
 	// By default, "localhost" is sent.
 	LocalName string
+	//UseUnencrypted connection, which means that all info in email are transport through plain text
+	//but it's friendly for common use, for example, testing, and some smtp servers that use port 25.
+	//When use unencrypted connection, server's TLS is cancels, it's a hack, bypass the check of server.TLS
+	//if server.tls false, go's std lib would panic. If force to connect to a server without TLS, set this to true.
+	ByPassServerTLSCheck bool
 }
 
 // NewDialer returns a new SMTP Dialer. The given parameters are used to connect
 // to the SMTP server.
-func NewDialer(host string, port int, username, password string) *Dialer {
+func NewDialer(host string, port int, username, password string, bsc bool) *Dialer {
 	return &Dialer{
 		Host:     host,
 		Port:     port,
 		Username: username,
 		Password: password,
 		SSL:      port == 465,
+		ByPassServerTLSCheck: bsc,
 	}
 }
 
@@ -51,9 +57,30 @@ func NewDialer(host string, port int, username, password string) *Dialer {
 // connect to the SMTP server.
 //
 // Deprecated: Use NewDialer instead.
-func NewPlainDialer(host string, port int, username, password string) *Dialer {
-	return NewDialer(host, port, username, password)
+//func NewPlainDialer(host string, port int, username, password string) *Dialer {
+//	return NewDialer(host, port, username, password)
+//}
+
+
+type FakeEncryptedAuth struct {
+	smtp.Auth
+
 }
+
+
+func (fake FakeEncryptedAuth)Start(server *smtp.ServerInfo) (string, []byte ,error){
+
+	fakeServer := *server
+	fakeServer.TLS = true
+	return fake.Auth.Start(&fakeServer)
+
+}
+
+func FakeAuth(identity, username, password, host string) FakeEncryptedAuth {
+	 return smtp.PlainAuth(identity, username, password, host).(FakeEncryptedAuth)
+}
+
+
 
 // Dial dials and authenticates to an SMTP server. The returned SendCloser
 // should be closed when done using it.
@@ -99,7 +126,11 @@ func (d *Dialer) Dial() (SendCloser, error) {
 					host:     d.Host,
 				}
 			} else {
-				d.Auth = smtp.PlainAuth("", d.Username, d.Password, d.Host)
+				if d.ByPassServerTLSCheck {
+					d.Auth = FakeAuth("", d.Username, d.Password, d.Host)
+				}else {
+					d.Auth = smtp.PlainAuth("", d.Username, d.Password, d.Host)
+				}
 			}
 		}
 	}
