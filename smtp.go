@@ -8,6 +8,7 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+	"errors"
 )
 
 // A Dialer is a dialer to an SMTP server.
@@ -63,21 +64,31 @@ func NewDialer(host string, port int, username, password string, bsc bool) *Dial
 
 
 type FakeEncryptedAuth struct {
-	smtp.Auth
+	identity, username, password, host string
 
 }
 
 
-func (fake FakeEncryptedAuth)Start(server *smtp.ServerInfo) (string, []byte ,error){
+func (fake *FakeEncryptedAuth)Start(server *smtp.ServerInfo) (string, []byte ,error){
 
-	fakeServer := *server
-	fakeServer.TLS = true
-	return fake.Auth.Start(&fakeServer)
+	if server.Name != fake.host {
+		return "", nil, errors.New("wrong host name")
+	}
+	resp := []byte(fake.identity + "\x00" + fake.username + "\x00" + fake.password)
+	return "PLAIN", resp, nil
 
 }
+func (fake *FakeEncryptedAuth)Next(fromServer []byte, more bool) ([]byte, error){
+	if more {
+		// We've already sent everything.
+		return nil, errors.New("unexpected server challenge")
+	}
+	return nil, nil
+}
 
-func FakeAuth(identity, username, password, host string) FakeEncryptedAuth {
-	 return smtp.PlainAuth(identity, username, password, host).(FakeEncryptedAuth)
+
+func FakeAuth(identity, username, password, host string) smtp.Auth {
+	 return &FakeEncryptedAuth{identity, username, password, host}
 }
 
 
